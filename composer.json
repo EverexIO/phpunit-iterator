@@ -1,0 +1,24 @@
+{
+    "name": "EverexIO/phpunit-iterator",
+    "description": "",
+    "keywords": [],
+    "license": "Apache 2.0",
+    "authors": [
+        {
+            "name": "Everex",
+            "homepage": "https://www.everex.io/"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/EverexIO/phpunit-iterator/issues"
+    },
+    "require": {
+        "php": ">=5.3.3",
+        "phpunit/phpunit": "3.7.*"
+    },
+    "autoload": {
+        "psr-0": {"EverexIO\\PHPUnitIterator": "src/"}
+    }
+    "minimum-stability": "dev",
+    "prefer-stable" : true,
+}
