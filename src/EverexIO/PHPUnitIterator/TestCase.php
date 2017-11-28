@@ -52,6 +52,9 @@ class TestCase extends \PHPUnit\Framework\TestCase
             is_array($result),
             sprintf("Invalid response received:\n%s", var_export($result, TRUE))
         );
+        foreach($test['asserts'] as $assert){
+            $this->processTestRule($result, $assert);
+        }
     }
 
     /**
@@ -60,31 +63,96 @@ class TestCase extends \PHPUnit\Framework\TestCase
     protected function processTestRule($result, $assert)
     {
         if(empty($assert['fields'])) return;
+        $fields = $assert['fields'];
+        $equal = isset($assert['equals']) ? $assert['equals'] : null;
         $type = isset($assert['type']) ? $assert['type'] : false;
         $isNot = (0 === strpos($type, '!'));
         if($isNot) {
             $type = substr($type, 1);
         }
-        foreach($fields as $field){
-            $this->processAssertType($type, $isNot, $field, $result);
+        if (is_array($fields))
+            foreach($fields as $field){
+                $this->processAssertType($type, $isNot, $field, $result, $assert, $equal);
+            }
+        else
+        {
+            $this->processAssertType($type, $isNot, $fields, $result, $assert, $equal);
         }
     }
 
     /**
      * Runs assertion
      */
-    protected function processAssertType($type, $isNot, $field, $result) {
+    protected function processAssertType($type, $isNot, $field, $result, $assert, $equal = null) {
+        $value = $this->getArrayValueFromString($result, $field);
         switch($type) {
             case 'isset':
-                 // Important: field can be in form of "f1:f2:f3" for multilevel arrays
-                 $res = $isNot ? !isset($result[$field]) : isset($result[$field]);
-                 $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
-                 break;
+                $val = isset($assert['array']) ? $result[0][$field] : $value;
+                // Important: field can be in form of "f1:f2:f3" for multilevel arrays
+                $this->logToConsole('check field "' . $field . '"');
+                $res = $isNot ? !isset($val) : isset($val);
+                $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
+                break;
             case 'empty':
-                 break;
+                $this->logToConsole('check field "' . $field . '" is not empty');
+                $res = $isNot ? !empty($value) : empty($value);
+                $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
+                break;
+            case 'count':
+                $gt =  isset($assert['gt']) ? $assert['gt'] : null;
+                $lt =  isset($assert['lt']) ? $assert['lt'] : null;
+                $range =  isset($assert['range']) ? $assert['range'] : null;
+                $cnt = isset($assert['array']) ? count($result) : count($result[$field]);
+                if (!is_null($gt))
+                {
+                    $this->logToConsole('check count greater than ' . $gt);
+                    $this->assertTrue($cnt > $gt, "count less than ".$gt);
+                }
+                else if (!is_null($lt))
+                {
+                    $this->logToConsole('check count less than ' . $lt);
+                    $this->assertTrue($cnt < $lt, "count greater than ".$lt);
+                }
+                else if (!is_null($range))
+                {
+                    $this->logToConsole('check count greater than ' . $range[0].' and less than ' . $range[1]);
+                    $this->assertTrue($cnt >= $range[0] && $cnt <= $range[1], "count less than ".$lt);
+                }
+                else
+                {
+                    $this->logToConsole('check count equals ' . $equal);
+                    $this->assertEquals($equal, $cnt, "fields are not equal");
+                }
+                break;
             default:
-                 // assertEqual
+                $val = isset($assert['array']) ? $result[0][$field] : $value;
+                $this->logToConsole('check "' . $field . '" equals "' . $equal . '"');
+                $this->assertEquals(strtolower($val), strtolower($equal), "fields are not equal");
         }
+    }
+
+    /**
+     * Returns value from object. Example - tokens:int(0):tokenInfo:address
+     */
+    protected function getArrayValueFromString($array, $str){
+        $fields = explode(':', $str);
+        $obj = $array;
+        foreach ($fields as $field){
+            $field = $this->checkIndex($field);
+            if (isset($obj[$field]))
+                $obj = $obj[$field];
+            else return null;
+        }
+        return $obj;
+    }
+
+    protected function checkIndex($key)
+    {
+        if (strpos($key, 'int') !== false)
+        {
+            return intval(preg_replace('/[^0-9]+/', '', $key), 10);
+        }
+        else return $key;
     }
 
     /**
