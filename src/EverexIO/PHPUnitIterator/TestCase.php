@@ -44,8 +44,14 @@ class TestCase extends \PHPUnit\Framework\TestCase
         {
             $this->logToConsole($test['description']);
         }
-
         // assert that result is array inside this method
+        $test['URL_params'] = isset($test['URL_params']) ? $test['URL_params'] : [];
+        if ($test['method'] == 'getBlockTransactions' && isset($test['GET_params']['block']) && $test['GET_params']['block'] == 'last')
+        {
+            $result = $this->sendRequest('getLastBlock', $test['URL_params'], $test['GET_params']);
+            $last = $result['lastBlock'];
+            $test['GET_params']['block'] = $last;
+        }
         $result = $this->sendRequest($test['method'], $test['URL_params'], $test['GET_params']);
         $this->logToConsole('check returned answer...');
         $this->assertTrue(
@@ -53,14 +59,14 @@ class TestCase extends \PHPUnit\Framework\TestCase
             sprintf("Invalid response received:\n%s", var_export($result, TRUE))
         );
         foreach($test['asserts'] as $assert){
-            $this->processTestRule($result, $assert);
+            $this->processTestRule($result, $assert, $test);
         }
     }
 
     /**
      * Processes a rule and calls an assertion
      */
-    protected function processTestRule($result, $assert)
+    protected function processTestRule($result, $assert, $test)
     {
         if(empty($assert['fields'])) return;
         $fields = $assert['fields'];
@@ -72,31 +78,65 @@ class TestCase extends \PHPUnit\Framework\TestCase
         }
         if (is_array($fields))
             foreach($fields as $field){
-                $this->processAssertType($type, $isNot, $field, $result, $assert, $equal);
+                $this->processAssertType($type, $isNot, $field, $result, $assert, $test, $equal);
             }
         else
         {
-            $this->processAssertType($type, $isNot, $fields, $result, $assert, $equal);
+            $this->processAssertType($type, $isNot, $fields, $result, $assert, $test, $equal);
         }
     }
 
     /**
      * Runs assertion
      */
-    protected function processAssertType($type, $isNot, $field, $result, $assert, $equal = null) {
+    protected function processAssertType($type, $isNot, $field, $result, $assert, $test, $equal = null) {
         $value = $this->getArrayValueFromString($result, $field);
         switch($type) {
             case 'isset':
-                $val = isset($assert['array']) ? $result[0][$field] : $value;
-                // Important: field can be in form of "f1:f2:f3" for multilevel arrays
-                $this->logToConsole('check field "' . $field . '"');
-                $res = $isNot ? !isset($val) : isset($val);
-                $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
+                if (isset($assert['array']))
+                {
+                    $count = isset($assert['count']) ? $assert['count'] : count($result);
+                    $this->logToConsole('check field "' . $field . '"');
+                    for ($i = 0; $i < $count; $i++)
+                    {
+                        $val = $result[$i][$field];
+                        $res = $isNot ? !isset($val) : isset($val);
+                        $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
+                    }
+                }
+                else
+                {
+                    $val = isset($assert['array']) ? $result[0][$field] : $value;
+                    // Important: field can be in form of "f1:f2:f3" for multilevel arrays
+                    $this->logToConsole('check field "' . $field . '"');
+                    $res = $isNot ? !isset($val) : isset($val);
+                    $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
+                }
                 break;
             case 'empty':
                 $this->logToConsole('check field "' . $field . '" is not empty');
                 $res = $isNot ? !empty($value) : empty($value);
                 $this->assertTrue($res, sprintf("isset assert failed for field %s", $field));
+                break;
+            case 'contain':
+                $this->logToConsole('check if array contains '. $field . ' with value '. $equal );
+                $contain = false;
+                if (isset($assert['array']))
+                {
+                    $count = isset($assert['count']) ? $assert['count'] : count($result) - 1;
+                    for ($i = 0; $i < $count; $i++)
+                    {
+                        $val = $result[$i][$field];
+                        if ($val == $equal) $contain = true;
+                    }
+                    $this->checkContains($isNot, $contain, $field, $equal);
+                }
+                else
+                {
+                    $val = $result[$field];
+                    if ($val == $equal) $contain = true;
+                    $this->checkContains($isNot, $contain, $field, $equal);
+                }
                 break;
             case 'count':
                 $gt =  isset($assert['gt']) ? $assert['gt'] : null;
@@ -124,10 +164,60 @@ class TestCase extends \PHPUnit\Framework\TestCase
                     $this->assertEquals($equal, $cnt, "fields are not equal");
                 }
                 break;
+            case 'timeCheck':
+                $oldvalue = $result['lastBlock'];
+                $this->logToConsole('waiting ' . $field . ' seconds');
+                sleep($field);
+                $result = $this->sendRequest($test['method'], $test['URL_params'], $test['GET_params']);
+                $newValue = $result["lastBlock"];
+                $this->logToConsole('check if block has changed');
+                $this->assertNotEquals($oldvalue, $newValue, "Last block doesn't changed");
+                break;
+            case 'checkTransaction':
+                $count = isset($assert['count']) ? $assert['count'] : count($result);
+                for ($i = 0; $i < $count; $i++)
+                {
+                    $hash = $result[$i]['hash'];
+                    $etherscan = json_decode(file_get_contents(
+                        sprintf("https://api.etherscan.io/api?module=proxy&action=eth_getTransactionByHash&txhash=%s&apikey=YourApiKeyToken",
+                            $hash)), TRUE)['result'];
+                    $this->assertEquals($result[$i]['from'], $etherscan['from'], "fields are not equal");
+                    $this->assertEquals($result[$i]['to'], $etherscan['to'], "fields are not equal");
+                    $eValue = hexdec($etherscan['value']) / (float) pow(10, 18);
+                    $this->assertEquals($result[$i]['value'], $eValue, "fields are not equal");
+                }
+                break;
+            case 'checkLastBlock':
+                $this->logToConsole('check last block timestamp difference');
+                $lastOperation = end($result['operations']);
+                $lastBlock = $this->sendRequest('getLastBlock', $test['URL_params'], $test['GET_params']);
+                $lastBlockValue = $lastBlock["lastBlock"];
+                $test['GET_params']['block'] = $lastBlockValue;
+                $blockTransactions = $this->sendRequest('getBlockTransactions', $test['URL_params'], $test['GET_params']);
+                foreach ($blockTransactions as $block)
+                {
+                    $interval = abs($block['timestamp'] - $lastOperation['timestamp']);
+                    $this->assertLessThan($assert['time'], $interval, sprintf("timestamp difference bigger than %s", $assert['time']));
+                }
+                break;
             default:
                 $val = isset($assert['array']) ? $result[0][$field] : $value;
                 $this->logToConsole('check "' . $field . '" equals "' . $equal . '"');
                 $this->assertEquals(strtolower($val), strtolower($equal), "fields are not equal");
+                break;
+        }
+    }
+
+    protected function checkContains($isNot, $contain, $field, $equal)
+    {
+        $res = !$isNot;
+        if (!$res)
+        {
+            $this->assertFalse($contain,sprintf("array contains %s equals %s", $field, $equal));
+        }
+        else
+        {
+            $this->assertTrue($contain, sprintf("can't find field '%s' equals %s in array", $field, $equal));
         }
     }
 
