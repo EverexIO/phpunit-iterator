@@ -164,6 +164,20 @@ class TestCase extends \PHPUnit\Framework\TestCase
                     $this->assertEquals($equal, $cnt, "fields are not equal");
                 }
                 break;
+            case 'compareArrays':
+                $count = isset($assert['count']) ? $assert['count'] : count($result);
+                for ($i = 0; $i < $count; $i++)
+                {
+                    $callback = isset($assert['callback']) ? $assert['callback'] : false;
+                    if(is_callable($callback)){
+                        $expected = $callback($result[$i]['hash']);
+                    }
+                    $fields = !empty($assert['fields']) ? $assert['fields'] : array_keys($expected);
+                    foreach($fields as $field){
+                        $this->assertEquals($result[$i][$field], $expected[$field], "fields are not equal");
+                    }
+                }
+                break;
             case 'timeCheck':
                 $oldvalue = $result['lastBlock'];
                 $this->logToConsole('waiting ' . $field . ' seconds');
@@ -172,20 +186,6 @@ class TestCase extends \PHPUnit\Framework\TestCase
                 $newValue = $result["lastBlock"];
                 $this->logToConsole('check if block has changed');
                 $this->assertNotEquals($oldvalue, $newValue, "Last block doesn't changed");
-                break;
-            case 'checkTransaction':
-                $count = isset($assert['count']) ? $assert['count'] : count($result);
-                for ($i = 0; $i < $count; $i++)
-                {
-                    $hash = $result[$i]['hash'];
-                    $etherscan = json_decode(file_get_contents(
-                        sprintf("https://api.etherscan.io/api?module=proxy&action=eth_getTransactionByHash&txhash=%s&apikey=YourApiKeyToken",
-                            $hash)), TRUE)['result'];
-                    $this->assertEquals($result[$i]['from'], $etherscan['from'], "fields are not equal");
-                    $this->assertEquals($result[$i]['to'], $etherscan['to'], "fields are not equal");
-                    $eValue = hexdec($etherscan['value']) / (float) pow(10, 18);
-                    $this->assertEquals($result[$i]['value'], $eValue, "fields are not equal");
-                }
                 break;
             case 'checkLastBlock':
                 $this->logToConsole('check last block timestamp difference');
