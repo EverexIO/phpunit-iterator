@@ -1,7 +1,7 @@
 <?php
 
 namespace EverexIO\PHPUnitIterator;
-
+use DOMDocument;
 use PHPUnit_Framework_TestCase;
 
 // class TestCase extends \PHPUnit\Framework\TestCase
@@ -9,12 +9,18 @@ class TestCase extends PHPUnit_Framework_TestCase
 {
     // @todo: move away from this class
     protected $url = '';
-
+    protected $everex_url = '';
     /**
      * This function can run a single test with different parameters (_iterate)
      */
     protected function _iterateTest($test)
     {
+        if(!empty($test['type']) && $test['type'] == 'everex')
+        {
+            $this->_iterateSingleEverexTest($test);
+            return;
+        }
+
         if(empty($test['asserts'])){
             $this->logToConsole("No assert rules found for test!");
             return;
@@ -32,6 +38,203 @@ class TestCase extends PHPUnit_Framework_TestCase
         }
 
         $this->_iterateSingleTest($test);
+    }
+
+    protected function _iterateSingleEverexTest($test)
+    {
+        $this->logToConsole('=== TESTING ' . $test['method'] . ' ===');
+
+        if(!empty($test['description']))
+        {
+            $this->logToConsole('=== INFO ' . $test['description'] . ' ===');
+        }
+
+        foreach ($test['compareTo'] as $cur)
+        {
+            $params = array($test['compareFrom'], $cur);
+            $result = $this->sendEverexRequest($test['method'], $params);
+            $dataset = $params[0].$params[1];
+            if (isset($test['compareReplace']))
+                $dataset = $test['compareReplace'];
+            $this->processComparing($result, $dataset, $test);
+        }
+    }
+
+    protected function processComparing($result, $dataset, $test)
+    {
+        $type = $test['compareSource'];
+        switch ($type)
+        {
+            case 'quandl':
+                $compareData = $this->getDataFromQuandl($test['compareSourceParam'], $dataset);
+                $this->compareHistoricData('quandl', $result['result'], $compareData['data']);
+                break;
+            case 'coinmarketcaphtml':
+                $compareData = $this->getDataFromCoinMarketCap('html', $test['compareSourceParam']);
+                $this->compareHistoricData('coinmarketcap', $result['result'], $compareData);
+                break;
+            case 'coinmarketcapapi':
+                $compareData = $this->getDataFromCoinMarketCap('api', $test['compareSourceParam']);
+                $this->compareCurrentData('coinmarketcap', $result['result'], $compareData, $test['compareTags']);
+                break;
+            case 'openexchangerates':
+                $compareData = $this->getDataFromOpenExchangeRates();
+                $tags = isset($test['compareTags']) ? $test['compareTags'] : array();
+                $this->compareCurrentData('openexchangerates', $result['result'], $compareData['rates'], $tags);
+                break;
+            case 'bitstamp':
+                $compareData = $this->getDataFromBitstamp();
+                $this->compareCurrentData('bitstamp', $result['result'], $compareData);
+                break;
+        }
+    }
+
+    protected function compareCurrentData($type, $everexData, $compareData, $compareTags = array()){
+        switch ($type)
+        {
+            case 'coinmarketcap':
+                foreach ($compareTags as $tags)
+                {
+                    $percentChange = (1 - $everexData[$tags[0]] / $compareData[$tags[1]]) * 100;
+                    $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                }
+                break;
+
+            case 'openexchangerates':
+                $key = !empty($compareTags) ? $compareTags[0] : $everexData['code_to'];
+                $percentChange = (1 - $everexData['rate'] / $compareData[$key]) * 100;
+                $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                break;
+
+            case 'bitstamp':
+                foreach ($everexData as $key => $val)
+                {
+                    $percentChange = (1 - $val / $compareData[$key]) * 100;
+                    $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                }
+                break;
+        }
+    }
+
+    protected function compareHistoricData($type, $everexData, $compareData)
+    {
+        $rand_keys = array_rand($everexData, 3);
+        $flag = false;
+        foreach ($rand_keys as $key){
+            $item = $everexData[$key];
+            $date = $item['date'];
+            $comparingItem = null;
+            foreach($compareData as $data) {
+                if ($date == $data[0]) {
+                    $flag = true;
+                    $comparingItem = $data;
+                    break;
+                }
+            }
+            $compareFlag = false;
+
+            if (is_null($comparingItem)) continue;
+
+            foreach ($comparingItem as $value){
+                if (is_string($value)) continue;
+                switch ($type)
+                {
+                    case 'quandl':
+                        if ($value == $item['rate'])
+                            $compareFlag = true;
+                        break;
+
+                    case 'coinmarketcap':
+                        foreach ($item as $val)
+                        {
+                            if ($value == $val)
+                                $compareFlag = true;
+                        }
+                        break;
+                }
+            }
+            $this->assertTrue($compareFlag, "Can't found equal data from $type");
+        }
+        $this->assertTrue($flag, "Can't find equal data");
+    }
+
+    protected function getDataFromBitstamp()
+    {
+        $url = 'http://www.bitstamp.net/api/ticker/';
+        $json = file_get_contents($url);
+        //using hardcoded data for test, because bitstamp.net is blocked by RKN
+        //$json = '{"high": "11175.00000000", "last": "10874.70", "timestamp": "1519990390", "bid": "10862.20", "vwap": "10917.79", "volume": "10639.14399544", "low": "10612.07000000", "ask": "10874.99", "open": 10917.37}';
+        $result = json_decode($json, TRUE);
+        return $result;
+    }
+
+    protected function getDataFromOpenExchangeRates()
+    {
+        $apiKey = '56373b75d3204d008efa8b62e0589743';
+        $url = 'https://openexchangerates.org/api/latest.json?app_id='.$apiKey;
+        $json = file_get_contents($url);
+        $result = json_decode($json, TRUE);
+        return $result;
+    }
+
+    protected function getDataFromQuandl($database, $dataset){
+        $apiKey = 'SS1Kj9CAzyj9bGssEQz9';
+        $url = 'https://www.quandl.com/api/v1/datasets/'.$database.
+            '/'.$dataset.'.json?auth_token='.$apiKey.'&trim_start=2015-04-01';
+        $json = file_get_contents($url);
+        $result = json_decode($json, TRUE);
+        return $result;
+    }
+
+    protected function getDataFromCoinMarketCap($type, $currency){
+        switch ($type)
+        {
+            case 'html':
+                $url = 'https://coinmarketcap.com/currencies/'.$currency.'/historical-data/?start=20130428&end=20180122';
+                $html = file_get_contents($url);
+                $DOM = new DOMDocument;
+                libxml_use_internal_errors(true);
+                $DOM->loadHTML($html);
+                libxml_clear_errors();
+                $result = array();
+                $data = $DOM->getElementsByTagName('tr');
+                foreach($data as $key => $node)
+                {   //first node is header node, so we skip it
+                    if ($key == 0) continue;
+                    $nodeValue = $node->nodeValue;
+                    $values = explode("\n", $nodeValue);
+                    $values = $this->remove_empty($values);
+                    $array_elem = array();
+                    foreach ($values as $innerkey => $val)
+                    {
+                        if ($innerkey == 1){
+                            $val = date('Y-m-d', strtotime($val));
+                        } else {
+                            $val = str_replace( ',', '', $val );
+                            $val = floatval($val);
+                        }
+                        array_push($array_elem, $val);
+                    }
+                    array_push($result, $array_elem);
+                }
+                return $result;
+                break;
+            case 'api':
+                $url = 'https://api.coinmarketcap.com/v1/ticker/?convert=USD&limit=0';
+                $data = json_decode(file_get_contents($url), true);
+                foreach ($data as $item)
+                {
+                    if ($item['id'] == $currency)
+                        return $item;
+                }
+                break;
+        }
+    }
+
+    function remove_empty($array) {
+        return array_filter($array, function($value) {
+            return !empty($value) || $value === 0;
+        });
     }
 
     /**
@@ -272,6 +475,34 @@ class TestCase extends PHPUnit_Framework_TestCase
             $url = $url . '?' . http_build_query($parameters);
         }
         $json = file_get_contents($url);
+        $aResult = json_decode($json, TRUE);
+        return $aResult;
+    }
+
+    // @todo: move away from this class
+    protected function sendEverexRequest($method, array $parameters = array())
+    {
+        $url = 'http://rates.everex.io';
+
+        /*{ "jsonrpc": "2.0", "method": "getCurrencyHistory", "params": ["USD", "THB"], "id": 0 }*/
+
+        $data = array(
+            'jsonrpc'     => '2.0',
+            'id'       => 1,
+            'method'    => $method,
+            'params' => $parameters
+        );
+
+        $json = json_encode($data);
+        $options = array(
+            'http' => array(
+                'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+                'method'  => 'POST',
+                'content' => $json
+            )
+        );
+        $context  = stream_context_create($options);
+        $json = file_get_contents($url, false, $context);
         $aResult = json_decode($json, TRUE);
         return $aResult;
     }
