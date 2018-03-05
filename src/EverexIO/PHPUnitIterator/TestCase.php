@@ -66,8 +66,9 @@ class TestCase extends PHPUnit_Framework_TestCase
         switch ($type)
         {
             case 'quandl':
+            case 'quandl-reverse':
                 $compareData = $this->getDataFromQuandl($test['compareSourceParam'], $dataset);
-                $this->compareHistoricData('quandl', $result['result'], $compareData['data']);
+                $this->compareHistoricData($type, $result['result'], $compareData['data']);
                 break;
             case 'coinmarketcaphtml':
                 $compareData = $this->getDataFromCoinMarketCap('html', $test['compareSourceParam']);
@@ -141,6 +142,12 @@ class TestCase extends PHPUnit_Framework_TestCase
                 {
                     case 'quandl':
                         if ($value == $item['rate'])
+                            $compareFlag = true;
+                        break;
+
+                    case 'quandl-reverse':
+                        $res = 1/$value;
+                        if ($res == $item['rate'])
                             $compareFlag = true;
                         break;
 
