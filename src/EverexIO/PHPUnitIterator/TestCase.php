@@ -79,9 +79,10 @@ class TestCase extends PHPUnit_Framework_TestCase
                 $this->compareCurrentData('coinmarketcap', $result['result'], $compareData, $test['compareTags']);
                 break;
             case 'openexchangerates':
+            case 'openexchangerates-reverse':
                 $compareData = $this->getDataFromOpenExchangeRates();
                 $tags = isset($test['compareTags']) ? $test['compareTags'] : array();
-                $this->compareCurrentData('openexchangerates', $result['result'], $compareData['rates'], $tags);
+                $this->compareCurrentData($type, $result['result'], $compareData['rates'], $tags);
                 break;
             case 'bitstamp':
                 $compareData = $this->getDataFromBitstamp();
@@ -96,17 +97,21 @@ class TestCase extends PHPUnit_Framework_TestCase
             case 'coinmarketcap':
                 foreach ($compareTags as $tags)
                 {
-                    $percentChange = (1 - $everexData[$tags[0]] / $compareData[$tags[1]]) * 100;
+                    $percentChange = abs((1 - $everexData[$tags[0]] / $compareData[$tags[1]]) * 100);
                     $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
                 }
                 break;
-
             case 'openexchangerates':
                 $key = !empty($compareTags) ? $compareTags[0] : $everexData['code_to'];
-                $percentChange = (1 - $everexData['rate'] / $compareData[$key]) * 100;
+                $percentChange = abs((1 - $everexData['rate'] / $compareData[$key]) * 100);
                 $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
                 break;
-
+            case 'openexchangerates-reverse':
+                $key = !empty($compareTags) ? $compareTags[0] : $everexData['code_to'];
+                $ev = 1 / $everexData['rate'];
+                $percentChange = abs((1 - $ev / $compareData[$key]) * 100);
+                $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                break;
             case 'bitstamp':
                 foreach ($everexData as $key => $val)
                 {
@@ -134,7 +139,11 @@ class TestCase extends PHPUnit_Framework_TestCase
             }
             $compareFlag = false;
 
-            if (is_null($comparingItem)) continue;
+            if (is_null($comparingItem)) {
+                $newData = $this->findNearest($date, $compareData, $everexData);
+                $comparingItem = $newData[0];
+                $item = $newData[1];
+            }
 
             foreach ($comparingItem as $value){
                 if (is_string($value)) continue;
@@ -160,9 +169,27 @@ class TestCase extends PHPUnit_Framework_TestCase
                         break;
                 }
             }
-            $this->assertTrue($compareFlag, "Can't found equal data from $type");
+            $this->assertTrue($compareFlag, "Can't find equal data from $type with date - $date");
         }
         $this->assertTrue($flag, "Can't find equal data");
+    }
+
+    protected function findNearest($date, $compareData, $everexData){
+        $prevDate = date('Y-m-d', strtotime('-1 day', strtotime($date)));
+        $arr = array();
+        foreach($compareData as $data) {
+            if ($prevDate == $data[0]) {
+                array_push($arr, $data);
+                foreach ($everexData as $ev){
+                    if ($ev['date'] == $prevDate)
+                        array_push($arr, $ev);
+                }
+                break;
+            }
+        }
+        if (empty($arr))
+            $arr = $this->findNearest($prevDate, $compareData, $everexData);
+        return $arr;
     }
 
     protected function getDataFromBitstamp()
