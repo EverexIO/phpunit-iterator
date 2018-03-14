@@ -2,19 +2,24 @@
 
 namespace EverexIO\PHPUnitIterator;
 
-use PHPUnit_Framework_TestCase;
-
-// class TestCase extends \PHPUnit\Framework\TestCase
-class TestCase extends PHPUnit_Framework_TestCase
+/**
+ *
+ */
+class TestCase extends \PHPUnit\Framework\TestCase
 {
     // @todo: move away from this class
     protected $url = '';
-
     /**
      * This function can run a single test with different parameters (_iterate)
      */
     protected function _iterateTest($test)
     {
+        if(!empty($test['type']) && $test['type'] == 'compare')
+        {
+            $this->_iterateSingleCompareTest($test);
+            return;
+        }
+
         if(empty($test['asserts'])){
             $this->logToConsole("No assert rules found for test!");
             return;
@@ -32,6 +37,156 @@ class TestCase extends PHPUnit_Framework_TestCase
         }
 
         $this->_iterateSingleTest($test);
+    }
+
+    protected function _iterateSingleCompareTest($test)
+    {
+        $this->logToConsole('=== TESTING ' . $test['method'] . ' ===');
+
+        if(!empty($test['description']))
+        {
+            $this->logToConsole('=== INFO ' . $test['description'] . ' ===');
+        }
+
+        foreach ($test['compareTo'] as $cur)
+        {
+            $params = array($test['compareFrom'], $cur);
+            $result = $this->sendPostJsonRequest($test['method'], $params);
+            $dataset = $params[0].$params[1];
+            if (isset($test['compareReplace']))
+                $dataset = $test['compareReplace'];
+            $this->processComparing($result, $dataset, $test);
+        }
+    }
+
+    protected function processComparing($result, $dataset, $test)
+    {
+        $type = $test['compareType'];
+        $callback = isset($test['callback']) ? $test['callback'] : false;
+        if(is_callable($callback)){
+            $compareData = isset($test['compareSourceParam']) ?
+                $callback($test['compareSourceParam'], $dataset) : $callback();
+            switch ($test['compareTime']){
+                case 'historic':
+                    $this->compareHistoricData($type, $result['result'], $compareData);
+                    break;
+                case 'current':
+                    $tags = isset($test['compareTags']) ? $test['compareTags'] : array();
+                    $this->compareCurrentData($type, $result['result'], $compareData, $tags);
+                    break;
+            }
+        }
+    }
+
+    protected function compareCurrentData($type, $sourceData, $compareData, $compareTags = array()){
+        switch ($type)
+        {
+            case 'cycle':
+                foreach ($compareTags as $tags)
+                {
+                    $percentChange = abs((1 - $sourceData[$tags[0]] / $compareData[$tags[1]]) * 100);
+                    $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                }
+                break;
+            case 'key':
+                $key = !empty($compareTags) ? $compareTags[0] : $sourceData['code_to'];
+                $percentChange = abs((1 - $sourceData['rate'] / $compareData[$key]) * 100);
+                $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                break;
+            case 'key-reverse':
+                $key = !empty($compareTags) ? $compareTags[0] : $sourceData['code_to'];
+                $ev = 1 / $sourceData['rate'];
+                $percentChange = abs((1 - $ev / $compareData[$key]) * 100);
+                $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                break;
+            case 'cycle-key':
+                foreach ($sourceData as $key => $val)
+                {
+                    $percentChange = abs((1 - $val / $compareData[$key]) * 100);
+                    $this->assertTrue($percentChange <= 10, "Percentage difference bigger than 10%");
+                }
+                break;
+        }
+    }
+
+    protected function compareHistoricData($type, $sourceData, $compareData)
+    {
+        $rand_keys = array_rand($sourceData, 3);
+        $flag = false;
+        foreach ($rand_keys as $key){
+            $item = $sourceData[$key];
+            $date = $item['date'];
+            $comparingItem = null;
+            foreach($compareData as $data) {
+                if ($date == $data[0]) {
+                    $flag = true;
+                    $comparingItem = $data;
+                    break;
+                }
+            }
+            $compareFlag = false;
+
+            if (is_null($comparingItem)) {
+                $newData = $this->findNearest($date, $compareData, $sourceData);
+                $comparingItem = $newData[0];
+                $item = $newData[1];
+            }
+
+            $error_msg = "Can't find equal data with date - $date.\n";
+
+            foreach ($comparingItem as $value){
+                if (is_string($value)) continue;
+                switch ($type)
+                {
+                    case 'normal':
+                        $error_msg .= "Compare rate = $value \n";
+                        if ($value == $item['rate'])
+                            $compareFlag = true;
+                        break;
+
+                    case 'reverse':
+                        $res = 1/$value;
+                        $error_msg .= "Compare rate = $res \n";
+                        if ($res == $item['rate'])
+                            $compareFlag = true;
+                        break;
+
+                    case 'cycle':
+                        $error_msg .= "Compare rate = $value \n";
+                        foreach ($item as $val)
+                        {
+                            if ($value == $val)
+                                $compareFlag = true;
+                        }
+                        break;
+                }
+            }
+            foreach ($item as $val)
+            {
+                if (is_string($val)) continue;
+                $error_msg .= "Source rate = $val \n";
+            }
+            $this->assertTrue($compareFlag, $error_msg);
+        }
+        $this->assertTrue($flag, "Can't find equal data");
+    }
+
+    protected function findNearest($date, $compareData, $sourceData){
+        $prevDate = date('Y-m-d', strtotime('-1 day', strtotime($date)));
+        $arr = array();
+        foreach($compareData as $data) {
+            if ($prevDate == $data[0]) {
+                array_push($arr, $data);
+                foreach ($sourceData as $ev){
+                    if ($ev['date'] == $prevDate)
+                        array_push($arr, $ev);
+                }
+                break;
+            }
+        }
+        if (empty($arr))
+            $arr = $this->findNearest($prevDate, $compareData, $sourceData);
+        return $arr;
     }
 
     /**
@@ -272,6 +427,32 @@ class TestCase extends PHPUnit_Framework_TestCase
             $url = $url . '?' . http_build_query($parameters);
         }
         $json = file_get_contents($url);
+        $aResult = json_decode($json, TRUE);
+        return $aResult;
+    }
+
+    // @todo: move away from this class
+    protected function sendPostJsonRequest($method, array $parameters = array())
+    {
+        $url = $this->url;
+
+        $data = array(
+            'jsonrpc'     => '2.0',
+            'id'       => 1,
+            'method'    => $method,
+            'params' => $parameters
+        );
+
+        $json = json_encode($data);
+        $options = array(
+            'http' => array(
+                'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+                'method'  => 'POST',
+                'content' => $json
+            )
+        );
+        $context  = stream_context_create($options);
+        $json = file_get_contents($url, false, $context);
         $aResult = json_decode($json, TRUE);
         return $aResult;
     }
