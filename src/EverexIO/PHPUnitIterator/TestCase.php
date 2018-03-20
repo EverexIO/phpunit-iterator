@@ -5,7 +5,7 @@ namespace EverexIO\PHPUnitIterator;
 /**
  *
  */
-class TestCase extends \PHPUnit\Framework\TestCase
+class TestCase extends TestCaseBase
 {
     // @todo: move away from this class
     protected $url = '';
@@ -51,6 +51,7 @@ class TestCase extends \PHPUnit\Framework\TestCase
         foreach ($test['compareTo'] as $cur)
         {
             $params = array($test['compareFrom'], $cur);
+            // @todo: use callback to get data and rid off this requests
             $result = $this->sendPostJsonRequest($test['method'], $params);
             $dataset = $params[0].$params[1];
             if (isset($test['compareReplace']))
