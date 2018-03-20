@@ -2,13 +2,12 @@
 
 namespace EverexIO\PHPUnitIterator;
 
-use PHPUnit_Framework_TestCase;
-
-if (defined('PHP_MAJOR_VERSION') && PHP_MAJOR_VERSION > 5) 
-{   // PHP 7
+if (class_exists('\PHPUnit\Framework\TestCase')) {
     class TestCaseBase extends \PHPUnit\Framework\TestCase {}
 } 
-else 
-{   // PHP 5
+else if (class_exists('PHPUnit_Framework_TestCase')) {
     class TestCaseBase extends PHPUnit_Framework_TestCase {}
+}
+else {
+    die('No suitable TestCase class found, please check PHPUnit version!');
 }
