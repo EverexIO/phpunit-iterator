@@ -283,7 +283,10 @@ class TestCase extends TestCaseBase
                     for ($i = 0; $i < $count; $i++)
                     {
                         $val = $result[$i][$field];
-                        if ($val == $equal) $contain = true;
+                        if ($val == $equal){
+                            $contain = true;
+                            break;
+                        }
                     }
                     $this->checkContains($isNot, $contain, $field, $equal);
                 }
@@ -449,6 +452,7 @@ class TestCase extends TestCaseBase
             'http' => array(
                 'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
                 'method'  => 'POST',
+                'ignore_errors' => TRUE,
                 'content' => $json
             )
         );
