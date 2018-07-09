@@ -430,7 +430,9 @@ class TestCase extends TestCaseBase
         if(!empty($parameters)){
             $url = $url . '?' . http_build_query($parameters);
         }
-        $json = file_get_contents($url);
+        $options = array('http' => array('ignore_errors' => TRUE));
+        $context  = stream_context_create($options);
+        $json = file_get_contents($url, false, $context);
         $aResult = json_decode($json, TRUE);
         return $aResult;
     }
