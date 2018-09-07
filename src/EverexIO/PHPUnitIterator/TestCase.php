@@ -56,6 +56,7 @@ class TestCase extends TestCaseBase
             $dataset = $params[0].$params[1];
             if (isset($test['compareReplace']))
                 $dataset = $test['compareReplace'];
+            $test['currentCompareTo'] = $cur;
             $this->processComparing($result, $dataset, $test);
         }
     }
@@ -66,7 +67,7 @@ class TestCase extends TestCaseBase
         $callback = isset($test['callback']) ? $test['callback'] : false;
         if(is_callable($callback)){
             $compareData = isset($test['compareSourceParam']) ?
-                $callback($test['compareSourceParam'], $dataset) : $callback();
+                $callback($test['compareSourceParam'], $dataset) : $callback($test['currentCompareTo']);
             switch ($test['compareTime']){
                 case 'historic':
                     $this->compareHistoricData($type, $result['result'], $compareData);
@@ -113,17 +114,29 @@ class TestCase extends TestCaseBase
     protected function compareHistoricData($type, $sourceData, $compareData)
     {
         $rand_keys = array_rand($sourceData, 3);
+        $comparingItem = null;
+        if(isset($compareData['currency']) && isset($compareData['date']) && isset($compareData['rate'])){
+           foreach($sourceData as $key => $val){
+               if($val['date'] === $compareData['date']){
+                   $rand_keys = [$key];
+                   $comparingItem = array($compareData['date'], (float)$compareData['rate']);
+               }
+           }
+        }
         $flag = false;
         foreach ($rand_keys as $key){
             $item = $sourceData[$key];
             $date = $item['date'];
-            $comparingItem = null;
-            foreach($compareData as $data) {
-                if ($date == $data[0]) {
-                    $flag = true;
-                    $comparingItem = $data;
-                    break;
+            if(!isset($comparingItem)){
+                foreach($compareData as $data) {
+                    if ($date == $data[0]) {
+                        $flag = true;
+                        $comparingItem = $data;
+                        break;
+                    }
                 }
+            }else{
+                $flag = true;
             }
             $compareFlag = false;
 
@@ -168,6 +181,7 @@ class TestCase extends TestCaseBase
                 $error_msg .= "Source rate = $val \n";
             }
             $this->assertTrue($compareFlag, $error_msg);
+            $comparingItem = null;
         }
         $this->assertTrue($flag, "Can't find equal data");
     }
