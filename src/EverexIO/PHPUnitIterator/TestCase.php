@@ -216,6 +216,10 @@ class TestCase extends TestCaseBase
         }
         // assert that result is array inside this method
         $test['URL_params'] = isset($test['URL_params']) ? $test['URL_params'] : [];
+        if(!empty($test['sleep'])){
+            sleep((int)$test['sleep']);
+        }
+        // @todo: remove this workaround
         if ($test['method'] == 'getBlockTransactions' && isset($test['GET_params']['block']) && $test['GET_params']['block'] == 'last')
         {
             $result = $this->sendRequest('getLastBlock', $test['URL_params'], $test['GET_params']);
@@ -444,7 +448,12 @@ class TestCase extends TestCaseBase
         if(!empty($parameters)){
             $url = $url . '?' . http_build_query($parameters);
         }
-        $options = array('http' => array('ignore_errors' => TRUE));
+        $options = array(
+            'http' => array(
+                'timeout'       => 300,
+                'ignore_errors' => TRUE
+            )
+        );
         $context  = stream_context_create($options);
         $json = file_get_contents($url, false, $context);
         $aResult = json_decode($json, TRUE);
@@ -457,19 +466,20 @@ class TestCase extends TestCaseBase
         $url = $this->url;
 
         $data = array(
-            'jsonrpc'     => '2.0',
-            'id'       => 1,
+            'jsonrpc'   => '2.0',
+            'id'        => 1,
             'method'    => $method,
-            'params' => $parameters
+            'params'    => $parameters
         );
 
         $json = json_encode($data);
         $options = array(
             'http' => array(
-                'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
-                'method'  => 'POST',
+                'timeout'       => 300,
+                'header'        => "Content-type: application/x-www-form-urlencoded\r\n",
+                'method'        => 'POST',
                 'ignore_errors' => TRUE,
-                'content' => $json
+                'content'       => $json
             )
         );
         $context  = stream_context_create($options);
